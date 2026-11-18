@@ -1,0 +1,18 @@
+{
+  "name": "borrowed-gravity",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A one-key (Shift) gravity-slingshot game in 3D space.",
+  "type": "module",
+  "scripts": {
+    "dev": "esbuild src/main.js --bundle --format=esm --outfile=web/bundle.js --servedir=web --serve=8000",
+    "build": "node tools/build.mjs",
+    "check-levels": "node tools/check-levels.mjs"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.5"
+  }
+}
