@@ -79,6 +79,34 @@ export class Sfx {
     this.pump.connect(this.pumpG).connect(this.master);
     this.pumpG.connect(this.verb);
     this.pump.start();
+
+    // sling whirr (spins faster as you spin up)
+    this.whirr = ctx.createOscillator();
+    this.whirr.type = 'triangle';
+    this.whirrAm = ctx.createGain();
+    this.whirrAm.gain.value = 0.5;
+    this.whirrLfo = ctx.createOscillator();
+    this.whirrLfo.frequency.value = 6;
+    const wl = ctx.createGain();
+    wl.gain.value = 0.5;
+    this.whirrLfo.connect(wl).connect(this.whirrAm.gain);
+    this.whirrLfo.start();
+    this.whirrG = ctx.createGain();
+    this.whirrG.gain.value = 0;
+    this.whirr.connect(this.whirrAm).connect(this.whirrG).connect(this.master);
+    this.whirr.start();
+
+    // shield hum
+    this.shieldG = ctx.createGain();
+    this.shieldG.gain.value = 0;
+    [196, 293.7, 392].forEach((f) => {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      o.connect(this.shieldG);
+      o.start();
+    });
+    this.shieldG.connect(this.master);
   }
 
   impulse(sec) {
@@ -145,6 +173,18 @@ export class Sfx {
     this.pumpG.gain.setTargetAtTime(on && !this.muted ? 0.07 : 0, t, 0.03);
   }
 
+  setSpin(spin, on) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.whirr.frequency.setTargetAtTime(110 + 220 * (spin - 1) + 40, t, 0.05);
+    this.whirrLfo.frequency.setTargetAtTime(5 + 14 * (spin - 1), t, 0.05);
+    this.whirrG.gain.setTargetAtTime(on && !this.muted ? 0.06 : 0, t, 0.05);
+  }
+  setShield(on) {
+    if (!this.ctx) return;
+    this.shieldG.gain.setTargetAtTime(on && !this.muted ? 0.035 : 0, this.ctx.currentTime, 0.03);
+  }
+
   // one-shots --------------------------------------------------------------
   release(c) {
     this.noise(0.5 + c * 0.4, { gain: 0.25 + 0.3 * c, f0: 300, f1: 2600, q: 0.8 });
@@ -154,6 +194,21 @@ export class Sfx {
   vent() { this.noise(0.45, { gain: 0.12, f0: 3000, f1: 600, q: 0.7 }); }
   modeKindle() { [392, 523.3, 659.3, 784].forEach((f, i) => this.tone(f, 0.5, { type: 'triangle', gain: 0.12, at: i * 0.08 })); }
   modeFlight() { [784, 587.3, 440, 293.7].forEach((f, i) => this.tone(f, 0.45, { type: 'sine', gain: 0.13, at: i * 0.08 })); }
+  modeSling() { [293.7, 440, 587.3, 880].forEach((f, i) => this.tone(f, 0.45, { type: 'square', gain: 0.05, at: i * 0.07, verb: 0.5 })); }
+  modeShield() { [220, 330, 220, 330].forEach((f, i) => this.tone(f, 0.22, { type: 'sawtooth', gain: 0.05, at: i * 0.11, verb: 0.2 })); }
+  modeLens() { this.tone(1760, 0.3, { type: 'sine', gain: 0.1 }); this.noise(0.06, { gain: 0.12, f0: 4000, f1: 3000, q: 2, at: 0.12 }); }
+  launch(spin) {
+    this.noise(0.6, { gain: 0.3, f0: 400, f1: 3200 + spin * 1200, q: 0.9 });
+    this.tone(220 * spin, 0.5, { type: 'triangle', gain: 0.15, slide: 2, verb: 0.3 });
+  }
+  flareWarn() { this.tone(660, 0.12, { type: 'square', gain: 0.035, slide: 1.4, verb: 0 }); }
+  blocked() { [880, 1318.5, 1760].forEach((f, i) => this.tone(f, 0.35, { type: 'triangle', gain: 0.08, at: i * 0.02 })); }
+  zap() { this.noise(0.4, { gain: 0.35, f0: 2400, f1: 200, q: 0.7 }); this.tone(120, 0.3, { type: 'sawtooth', gain: 0.12, slide: 0.5, verb: 0 }); }
+  focusTick() { this.tone(2400, 0.03, { type: 'sine', gain: 0.03, verb: 0 }); }
+  shutter() {
+    this.noise(0.05, { gain: 0.35, f0: 5000, f1: 2500, q: 1.5 });
+    this.noise(0.07, { gain: 0.25, f0: 3500, f1: 1500, q: 1.5, at: 0.08 });
+  }
   live() { this.tone(1046.5, 0.25, { type: 'sine', gain: 0.12 }); this.tone(1568, 0.3, { type: 'sine', gain: 0.06, at: 0.05 }); }
   locked() { this.tone(140, 0.09, { type: 'square', gain: 0.04, verb: 0 }); }
   tick() { this.tone(880, 0.05, { type: 'sine', gain: 0.05, verb: 0 }); }

@@ -34,19 +34,43 @@
   <div class="hint" id="hint"></div>
   <div class="toast" id="toast"></div>
   <div class="key" id="key">
+    <div class="mode-info" id="modeInfo"></div>
     <div class="key-meter"><div class="key-fill" id="keyFill"></div></div>
     <div class="keycap"><span class="glyph">⇧</span><span>Shift</span></div>
     <div class="key-label" id="keyLabel">Borrow gravity</div>
   </div>
 </div>
 
-<!-- mode switch overlay: shown during every hand-over between Shift functions -->
+<!-- mode switch card: every hand-over between Shift functions. Time holds here
+     until the player taps Shift to start the next mode. -->
 <div id="switch" class="switch" hidden>
   <div class="switch-kicker" id="switchKicker">Shift changes function</div>
   <div class="switch-title" id="switchTitle">Kindle</div>
   <div class="switch-sub" id="switchSub">Shift now pumps light into the star</div>
+  <div class="switch-how" id="switchHow"></div>
   <div class="switch-lock"><div class="switch-fill" id="switchFill"></div></div>
-  <div class="switch-note" id="switchNote">Shift is locked</div>
+  <div class="switch-note" id="switchNote">Get ready…</div>
+</div>
+
+<!-- SHIELD: closing warning rings around the spark, one per incoming flare -->
+<div id="flares" class="flares"></div>
+
+<!-- LENS: camera viewfinder -->
+<div id="lens" class="lens" hidden>
+  <div class="vf-corner tl"></div><div class="vf-corner tr"></div><div class="vf-corner bl"></div><div class="vf-corner br"></div>
+  <div class="vf-reticle"></div>
+  <div class="vf-top"><span class="vf-rec"></span><span id="lensName">—</span></div>
+  <div class="vf-focus">
+    <div class="vf-scale"><div class="vf-target" id="lensTarget"></div><div class="vf-needle" id="lensNeedle"></div></div>
+    <div class="vf-label">focus</div>
+  </div>
+  <div class="vf-status" id="lensStatus">get ready</div>
+</div>
+
+<!-- a photo you just took -->
+<div id="photo" class="photo" hidden>
+  <img id="photoImg" alt="">
+  <div class="photo-cap"><span id="photoName">—</span><span class="photo-stars" id="photoStars"></span></div>
 </div>
 
 <!-- kindle gauge -->
@@ -96,6 +120,7 @@
   <h2 class="intro-name" id="resName">—</h2>
   <div class="medals" id="resMedals"></div>
   <div class="stats" id="resStats"></div>
+  <div class="res-photos" id="resPhotos"></div>
   <div class="holdkey small"><div class="holdkey-ring"></div><div class="holdkey-cap">⇧</div></div>
   <div class="help" id="resHelp"><span class="k">hold</span> next constellation <span class="sep">·</span> <span class="k">tap</span> sky map</div>
 </section>
@@ -111,6 +136,13 @@
 <section class="screen pause" id="scrPause" hidden>
   <div class="kicker">Paused</div>
   <h2 class="intro-name">Holding still</h2>
+  <ul class="legend">
+    <li style="--c: var(--cyan)"><b>Flight</b><span>inside a dashed ring, hold to borrow gravity · let go to be pulled</span></li>
+    <li style="--c: var(--amber)"><b>Kindle</b><span>hold to pump light · let go in the amber band</span></li>
+    <li style="--c: var(--violet)"><b>Sling</b><span>tap when the violet line points at NEXT · or hold to spin up, then let go</span></li>
+    <li style="--c: var(--green)"><b>Shield</b><span>hold as a red ring meets the green circle · let go between flares</span></li>
+    <li style="--c: var(--pink)"><b>Lens</b><span>hold to focus · let go to take the photo</span></li>
+  </ul>
   <div class="holdkey small"><div class="holdkey-ring"></div><div class="holdkey-cap">⇧</div></div>
   <div class="help"><span class="k">tap</span> resume <span class="sep">·</span> <span class="k">hold</span> sky map</div>
 </section>

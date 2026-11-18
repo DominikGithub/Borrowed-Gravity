@@ -1,0 +1,6 @@
+node_modules
+dist
+web/bundle.js
+.git
+*.md
+docs

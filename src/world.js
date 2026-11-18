@@ -11,6 +11,16 @@ export const COLORS = {
   red: new THREE.Color('#ff4d61'),
   gold: new THREE.Color('#ffd98a'),
   white: new THREE.Color('#ffffff'),
+  violet: new THREE.Color('#b98cff'),
+  green: new THREE.Color('#7dff9a'),
+  pink: new THREE.Color('#ff7ad9'),
+  storm: new THREE.Color('#ff6a3a'),
+};
+
+// The colour of every Shift function. Zone rings use the colour of the mode
+// they switch to, so a ring always tells you what Shift is about to become.
+export const MODE_COLORS = {
+  flight: COLORS.cyan, kindle: COLORS.amber, sling: COLORS.violet, shield: COLORS.green, lens: COLORS.pink,
 };
 
 const PALETTES = {
@@ -431,6 +441,7 @@ class Particles {
 // ------------------------------------------------------------------ world
 
 const V = () => new THREE.Vector3();
+const TMPV = new THREE.Vector3();
 
 // Free GPU memory of a subtree (shared geometry and cached textures survive).
 function disposeTree(obj) {
@@ -457,7 +468,7 @@ export class World {
     this.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 8000);
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.95, 0.55, 0.18);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.85, 0.5, 0.42);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
@@ -487,6 +498,14 @@ export class World {
     this.endMarker = new Billboard(2.4, ringMaterial(COLORS.cyan, { opacity: 0.9, px: 3, dashes: 6, spin: 0.6 }));
     this.endMarker.mesh.visible = false;
     this.scene.add(this.endMarker.mesh);
+    // the NEXT beacon: rings pinging outward from the next stop on the route,
+    // kept a minimum size on screen so it reads from far away
+    this.beacon = [0, 1].map(() => {
+      const r = new Billboard(1, ringMaterial(COLORS.amber, { opacity: 0, px: 2.6 }));
+      r.mesh.visible = false;
+      this.scene.add(r.mesh);
+      return r;
+    });
     this.shock = [];
 
     this.levelGroup = new THREE.Group();
@@ -496,6 +515,7 @@ export class World {
     this.tmpPts = [];
 
     this.rig = new CameraRig(this.camera);
+    this.tmpV3 = TMPV;
     this.time = 0;
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -592,9 +612,9 @@ export class World {
 
   buildComet() {
     this.comet = new THREE.Group();
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.4, 20, 14), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 1.8, 2.1) }));
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.4, 20, 14), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.15, 1.4, 1.7) }));
     this.comet.add(core);
-    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: COLORS.cyan, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: COLORS.cyan, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.75 }));
     glow.scale.setScalar(1.6);
     this.comet.add(glow);
     const inner = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
@@ -605,6 +625,27 @@ export class World {
     this.cometLight = new THREE.PointLight('#7fe8ff', 22, 60, 1.6);
     this.comet.add(this.cometLight);
     this.scene.add(this.comet);
+    this.shieldMesh = new THREE.Mesh(new THREE.SphereGeometry(1.7, 32, 20), new THREE.ShaderMaterial({
+      uniforms: { uAmt: { value: 0 }, uTime: { value: 0 } },
+      vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP; void main(){ vP = position; vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `uniform float uAmt; uniform float uTime; varying vec3 vN; varying vec3 vV; varying vec3 vP;
+        void main(){
+          float f = pow(1.0 - abs(dot(vN, vV)), 2.6);
+          float hex = 0.5 + 0.5 * sin(vP.x * 9.0 + uTime * 4.0) * sin(vP.y * 9.0) * sin(vP.z * 9.0 - uTime * 3.0);
+          float a = uAmt * (f * 0.8 + 0.03 + hex * 0.15 * f);
+          gl_FragColor = vec4(vec3(0.45, 1.0, 0.6) * (0.7 + 0.8 * f), a);
+        }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    this.shieldMesh.visible = false;
+    this.comet.add(this.shieldMesh);
+    this.orbitRing = new Ribbon(65, { color: COLORS.violet, dash: 2.2, dashSpeed: 0.6, duty: 0.55, opacity: 0.45, fadeOut: 1.0, core: 0.2 });
+    this.scene.add(this.orbitRing.mesh);
+    this.flareRibbons = [0, 1, 2, 3, 4].map(() => {
+      const r = new Ribbon(16, { color: COLORS.storm, opacity: 0.8, core: 0.6 });
+      this.scene.add(r.mesh);
+      return r;
+    });
     this.trail = new Ribbon(150, { color: new THREE.Color('#bff4ff'), endColor: new THREE.Color('#2a6cff'), fadeOut: 0.05, core: 0.5, near: [5, 15] });
     this.trailPts = [];
     this.scene.add(this.trail.mesh);
@@ -616,6 +657,7 @@ export class World {
       this.levelGroup.remove(v.group);
       disposeTree(v.group);
       if (v.lane) { this.levelGroup.remove(v.lane.mesh); disposeTree(v.lane.mesh); }
+      for (const m of v.extra || []) { this.levelGroup.remove(m); disposeTree(m); }
     }
     for (const l of this.lines) { this.levelGroup.remove(l.ribbon.mesh); disposeTree(l.ribbon.mesh); }
     this.bodyViews = [];
@@ -720,6 +762,60 @@ export class World {
       }
       v.light = new THREE.PointLight('#ffcf8a', 0, 220, 1.3);
       group.add(v.light);
+    } else if (b.type === 'anchor') {
+      // spindle star: a tiny violet pulsar with sweeping beams
+      group.add(new THREE.Mesh(new THREE.SphereGeometry(b.radius, 32, 20), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.7, 1.35, 2.6) })));
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: COLORS.violet, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
+      glow.scale.setScalar(b.radius * 8);
+      group.add(glow);
+      const beams = new THREE.Group();
+      const bm = new THREE.MeshBasicMaterial({ color: COLORS.violet, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      for (const sgn of [1, -1]) {
+        const g = new THREE.ConeGeometry(b.radius * 1.4, b.zone * 1.5, 24, 1, true);
+        g.translate(0, -b.zone * 0.75, 0);
+        const m = new THREE.Mesh(g, bm);
+        if (sgn < 0) m.rotation.x = Math.PI;
+        beams.add(m);
+      }
+      beams.rotation.z = 0.6;
+      group.add(beams);
+      v.beams = beams;
+    } else if (b.type === 'whitehole') {
+      group.add(new THREE.Mesh(new THREE.SphereGeometry(b.radius, 40, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.4, 2.6) })));
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: new THREE.Color('#dff6ff'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.85 }));
+      glow.scale.setScalar(b.radius * 5);
+      group.add(glow);
+      v.outRipples = [0, 1, 2].map(() => {
+        const r = new Billboard(1, ringMaterial(new THREE.Color('#e8f8ff'), { opacity: 0, px: 2.2 }));
+        group.add(r.mesh); v.rings.push(r);
+        return r;
+      });
+    } else if (b.type === 'storm') {
+      const shell = new THREE.Mesh(new THREE.SphereGeometry(b.zone, 48, 32), new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 }, uColor: { value: COLORS.storm.clone() } },
+        vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP;
+          void main(){ vP = position; vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: `uniform float uTime; uniform vec3 uColor; varying vec3 vN; varying vec3 vV; varying vec3 vP;
+          ${GLSL_NOISE}
+          void main(){
+            float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.2);
+            float n = fbm3(normalize(vP) * 3.0 + vec3(uTime * 0.15, 0.0, uTime * 0.1));
+            float streak = smoothstep(0.55, 0.85, n);
+            float a = f * (0.4 + 0.5 * streak) + 0.025;
+            gl_FragColor = vec4(uColor * (0.9 + streak * 1.2), a);
+          }`,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      }));
+      group.add(shell);
+      v.shell = shell;
+    } else if (b.type === 'flarestar') {
+      group.add(new THREE.Mesh(new THREE.SphereGeometry(b.radius, 40, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.6, 0.95, 0.4) })));
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: COLORS.storm, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.95 }));
+      glow.scale.setScalar(b.radius * 7);
+      group.add(glow);
+      v.glow = glow;
+    } else if (b.type === 'subject') {
+      this.makeSubject(b, group, v);
     } else {
       const seed = Math.abs(Math.round(b.x * 7 + b.y * 13 + b.z * 3)) % 997 + 1;
       const mat = new THREE.MeshToonMaterial({ map: this.planetTex(b.type, b.def.palette || 'teal', seed), gradientMap: this.toonGrad });
@@ -758,7 +854,7 @@ export class World {
         group.add(ring);
       }
     }
-    if (!b.ember) {
+    if (!b.ember && b.influence > 0 && b.pull !== 0) {
       // gravity field edge + loading ripple
       const field = new Billboard(b.influence, ringMaterial(COLORS.cyan, { opacity: 0.16, px: 1.6, dashes: 64, spin: 0.01 }));
       group.add(field.mesh); v.field = field;
@@ -766,7 +862,65 @@ export class World {
       group.add(ripple.mesh); v.ripple = ripple;
       v.rings.push(field, ripple);
     }
+    if (b.trigger && !b.ember) {
+      // mode-switch ring in the colour of the mode it switches to
+      const zr = new Billboard(b.zone, ringMaterial(MODE_COLORS[b.trigger], { opacity: 0.8, px: 2.4, dashes: b.trigger === 'shield' ? 96 : 48, spin: 0.012, fill: 0.3 }));
+      group.add(zr.mesh); v.rings.push(zr); v.zoneRing = zr;
+    }
     return v;
+  }
+
+  makeSubject(b, group, v) {
+    const r = b.radius;
+    const kind = b.def.kind;
+    const back = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: COLORS.pink, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.25 }));
+    back.scale.setScalar(r * 9);
+    group.add(back);
+    v.anim = new THREE.Group();
+    group.add(v.anim);
+    if (kind === 'bloom') {
+      const cols = ['#ff7ad9', '#b98cff', '#5fe3ff', '#ffd98a'];
+      for (let ring = 0; ring < 2; ring++) {
+        const n = ring ? 7 : 12;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 + ring * 0.3;
+          const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: new THREE.Color(cols[(i + ring) % cols.length]), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+          const rr = r * (ring ? 0.55 : 1.15);
+          sp.position.set(Math.cos(a) * rr, Math.sin(a) * rr, Math.sin(a * 3) * r * 0.2);
+          sp.scale.setScalar(r * (ring ? 0.9 : 1.3));
+          v.anim.add(sp);
+        }
+      }
+      const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+      core.scale.setScalar(r * 1.4);
+      v.anim.add(core);
+    } else if (kind === 'dancers') {
+      v.dancers = [['#9fd8ff', 0], ['#ffb26a', Math.PI]].map(([c, ph]) => {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(r * 0.28, 24, 16), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(2.2) }));
+        const g = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: new THREE.Color(c), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        g.scale.setScalar(r * 1.8);
+        m.add(g);
+        v.anim.add(m);
+        const trail = new Ribbon(48, { color: new THREE.Color(c), endColor: new THREE.Color(c), fadeOut: 0.05, opacity: 0.8 });
+        this.levelGroup.add(trail.mesh);
+        (v.extra = v.extra || []).push(trail.mesh);
+        return { m, ph, trail, pts: [] };
+      });
+      v.anim.rotation.set(0.5, 0, 0.3);
+    } else {
+      for (let i = 0; i < 6; i++) {
+        const size = r * (0.35 + 0.12 * ((i * 7) % 5));
+        const geo = new THREE.OctahedronGeometry(size, 0);
+        geo.scale(0.6, 1.6, 0.6);
+        const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.25, 0.6, 0.9), transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }));
+        const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: new THREE.Color(1.6, 2.0, 2.4) }));
+        m.add(e);
+        const a = (i / 6) * Math.PI * 2;
+        m.position.set(Math.cos(a) * r * 0.6, (i % 2 ? 0.3 : -0.3) * r, Math.sin(a) * r * 0.6);
+        m.rotation.set(Math.cos(a) * 0.6, a, Math.sin(a) * 0.6);
+        v.anim.add(m);
+      }
+    }
   }
 
   setEmberHeat(id, heat) {
@@ -806,20 +960,22 @@ export class World {
   }
 
   // ---------------------------------------------------------------- per frame
-  setPreview(pts, end, charge, ghostPts, ghostEnd, showGhost) {
+  setPreview(pts, end, charge, ghostPts, ghostEnd, showGhost, color = COLORS.cyan) {
     const cam = this.camera.position;
+    const endCol = (e) => (!e ? color : e.type === 'crash' ? COLORS.red : MODE_COLORS[e.mode] || color);
     if (pts && pts.length >= 6) {
       const n = pts.length / 3;
       this.preview.set(pts, n, cam, t => 0.16 + 0.22 * charge * (1 - t * 0.5));
       const u = this.preview.u;
       u.uOpacity.value = 0.55 + 0.45 * charge;
       const bad = end && end.type === 'crash';
-      u.uEndColor.value.copy(bad ? COLORS.red : end && end.type === 'corona' ? COLORS.amber : COLORS.cyan);
+      u.uColor.value.copy(color);
+      u.uEndColor.value.copy(endCol(end));
       u.uFadeOut.value = end ? 0.97 : 0.65;
       if (end) {
         this.endMarker.mesh.visible = true;
         this.endMarker.mesh.position.set(end.x, end.y, end.z);
-        this.endMarker.u.uColor.value.copy(bad ? COLORS.red : COLORS.amber);
+        this.endMarker.u.uColor.value.copy(endCol(end));
         const d = cam.distanceTo(this.endMarker.mesh.position);
         this.endMarker.mesh.scale.setScalar(Math.max(1.6, d * 0.03) * (bad ? 1 : 1.3));
       } else this.endMarker.mesh.visible = false;
@@ -830,9 +986,70 @@ export class World {
     if (showGhost && ghostPts && ghostPts.length >= 6) {
       this.ghost.set(ghostPts, ghostPts.length / 3, cam, 0.1);
       const bad = ghostEnd && ghostEnd.type === 'crash';
-      this.ghost.u.uEndColor.value.copy(bad ? COLORS.red : ghostEnd && ghostEnd.type === 'corona' ? COLORS.amber : COLORS.cyan);
+      void bad;
+      this.ghost.u.uEndColor.value.copy(endCol(ghostEnd));
       this.ghost.u.uFadeOut.value = ghostEnd ? 0.95 : 0.6;
     } else this.ghost.mesh.visible = false;
+  }
+
+  // SLING: the orbit you are on
+  setOrbitRing(o, radius) {
+    if (!o) { this.orbitRing.mesh.visible = false; return; }
+    const pts = this.tmpPts;
+    pts.length = 0;
+    for (let i = 0; i <= 64; i++) {
+      const a = (i / 64) * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a);
+      pts.push(o.cx + radius * (o.u[0] * c + o.k[0] * sn), o.cy + radius * (o.u[1] * c + o.k[1] * sn), o.cz + radius * (o.u[2] * c + o.k[2] * sn));
+    }
+    this.orbitRing.set(pts, 65, this.camera.position, 0.12);
+  }
+
+  // SHIELD: bubble around the spark
+  setShield(amount, energy) {
+    const m = this.shieldMesh;
+    m.visible = amount > 0.01;
+    m.material.uniforms.uAmt.value = amount * (energy < 0.25 ? 0.6 + 0.4 * Math.sin(this.time * 40) : 1);
+    m.scale.setScalar(0.85 + 0.15 * amount);
+  }
+
+  // SHIELD: incoming flares. list: {a:[x,y,z], b:[x,y,z], warn:0..1, bolt:-1|0..1}
+  setFlares(list) {
+    const cam = this.camera.position;
+    this.flareRibbons.forEach((rb, i) => {
+      const f = list[i];
+      if (!f) { rb.mesh.visible = false; return; }
+      const pts = this.tmpPts;
+      pts.length = 0;
+      const n = 16;
+      let t0 = 0, t1 = 1;
+      if (f.bolt >= 0) { t1 = f.bolt; t0 = Math.max(0, f.bolt - 0.22); }
+      for (let k = 0; k < n; k++) {
+        const t = t0 + (t1 - t0) * (k / (n - 1));
+        const jit = f.bolt >= 0 ? Math.sin(k * 2.7 + this.time * 60) * 0.6 : 0;
+        pts.push(f.a[0] + (f.b[0] - f.a[0]) * t + jit, f.a[1] + (f.b[1] - f.a[1]) * t - jit, f.a[2] + (f.b[2] - f.a[2]) * t);
+      }
+      rb.set(pts, n, cam, f.bolt >= 0 ? 0.9 : 0.25);
+      const u = rb.u;
+      if (f.bolt >= 0) {
+        u.uDash.value = 0; u.uOpacity.value = 1.6; u.uColor.value.set('#fff2c8'); u.uEndColor.value.set('#ffffff'); u.uFadeIn.value = 0.3; u.uFadeOut.value = 1.0;
+      } else {
+        u.uDash.value = 4; u.uDashSpeed.value = 2.5; u.uColor.value.copy(COLORS.storm); u.uEndColor.value.copy(COLORS.red);
+        u.uOpacity.value = (0.25 + 0.6 * f.warn) * (0.75 + 0.25 * Math.sin(this.time * 30)); u.uFadeIn.value = 0; u.uFadeOut.value = 1.0;
+      }
+      u.uTime.value = this.time;
+    });
+  }
+
+  // LENS: grab the current frame as a small photo (call right after render)
+  capture(blurPx = 0) {
+    const src = this.renderer.domElement;
+    const w = 360, h = Math.round(w * src.height / src.width);
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    if (blurPx > 0.4) ctx.filter = `blur(${(blurPx * w / Math.max(1, src.clientWidth)).toFixed(2)}px)`;
+    ctx.drawImage(src, 0, 0, w, h);
+    return cv.toDataURL('image/jpeg', 0.85);
   }
 
   setTether(cx, cy, cz, body, charge, charging) {
@@ -860,17 +1077,19 @@ export class World {
     this.starMat.uniforms.uTime.value = t;
 
     // comet
-    this.comet.visible = s.cometVisible;
+    const showComet = s.cometVisible && !s.hideComet;
+    this.comet.visible = showComet;
+    this.shieldMesh.material.uniforms.uTime.value = t;
     this.comet.position.set(s.cx, s.cy, s.cz);
     const pulse = 1 + 0.08 * Math.sin(t * 14);
     const mc = s.modeColor || COLORS.cyan;
     this.cometGlow.material.color.copy(mc);
-    this.cometGlow.scale.setScalar((1.5 + s.charge * 1.3) * pulse * (s.cometScale ?? 1));
+    this.cometGlow.scale.setScalar((1.25 + s.charge * 1.1) * pulse * (s.cometScale ?? 1));
     this.cometLight.color.copy(mc);
     this.cometCore.scale.setScalar(s.cometScale ?? 1);
 
     // trail
-    if (s.cometVisible) {
+    if (showComet) {
       const tp = this.trailPts;
       tp.unshift(s.cx, s.cy, s.cz);
       if (tp.length > 150 * 3) tp.length = 150 * 3;
@@ -883,13 +1102,30 @@ export class World {
 
     // sparks from the comet
     const fz = s.frozen ? 0 : 1;
-    if (s.cometVisible && Math.random() < 0.9) {
+    if (showComet && Math.random() < 0.9) {
       const k = 1 + Math.floor(s.charge * 3);
       for (let i = 0; i < k; i++) {
         this.particles.emit(s.cx, s.cy, s.cz, (Math.random() - 0.5) * 6 - s.vx * 0.15 * fz, (Math.random() - 0.5) * 6 - s.vy * 0.15 * fz, (Math.random() - 0.5) * 6 - s.vz * 0.15 * fz,
           i === 0 ? COLORS.white : mc, 0.35 + Math.random() * 0.4, 0.5 + Math.random() * 0.6);
       }
     }
+
+    // NEXT beacon
+    const nb = s.nextId >= 0 ? this.bodyViews[s.nextId] : null;
+    this.beacon.forEach((r, i) => {
+      r.mesh.visible = !!nb;
+      if (!nb) return;
+      const b = nb.body;
+      const camD = cam.position.distanceTo(nb.group.position);
+      const base = Math.max(b.ember ? b.corona : b.zone, camD * 0.05);
+      const ph = (t * 0.5 + i * 0.5) % 1;
+      const R = base * (1 + 1.4 * ph);
+      r.mesh.position.copy(nb.group.position);
+      r.mesh.quaternion.copy(cam.quaternion);
+      r.mesh.scale.setScalar(R / 0.96);
+      r.u.uColor.value.copy(b.type === 'anchor' ? COLORS.violet : COLORS.amber);
+      r.u.uOpacity.value = 0.7 * (1 - ph) * Math.min(1, ph * 5) * smoothstep(R * 1.02, R * 1.45, camD);
+    });
 
     // bodies
     for (const v of this.bodyViews) {
@@ -899,6 +1135,48 @@ export class World {
       const inside = (R) => smoothstep(R * 1.02, R * 1.45, camD);
       for (const r of v.rings) { r.mesh.quaternion.copy(cam.quaternion); r.u.uTime.value = t; }
       if (v.disk) v.disk.material.uniforms.uTime.value = t;
+      if (v.beams) v.beams.rotation.y += dt * 2.4;
+      if (v.shell) v.shell.material.uniforms.uTime.value = t;
+      if (v.zoneRing) {
+        const isF = s.focusZone === b.id;
+        const base = b.done ? 0.12 : isF ? 1.3 : 0.8;
+        v.zoneRing.u.uOpacity.value = base * inside(b.zone);
+      }
+      if (v.outRipples) {
+        const charging = s.targetId === b.id && s.charging;
+        v.outRipples.forEach((r, i) => {
+          const ph = (t * (charging ? 0.9 : 0.4) + i / 3) % 1;
+          const rad = b.radius * 1.2 + (b.influence - b.radius * 1.2) * ph;
+          r.mesh.scale.setScalar(rad / 0.96);
+          r.u.uOpacity.value = (charging ? 0.8 : 0.3) * Math.sin(Math.PI * ph) * inside(rad);
+        });
+      }
+      if (v.anim) {
+        v.anim.rotation.z += dt * 0.25;
+        if (b.def.kind === 'crystal') v.anim.rotation.y += dt * 0.4;
+        if (b.def.kind === 'bloom') v.anim.children.forEach((c, i) => c.scale.setScalar(b.radius * (i < 12 ? 1.3 : i < 19 ? 0.9 : 1.4) * (1 + 0.18 * Math.sin(t * 2.2 + i))));
+        if (v.dancers) {
+          for (const d of v.dancers) {
+            const a = t * 1.6 + d.ph;
+            d.m.position.set(Math.cos(a) * b.radius * 0.9, Math.sin(a * 2) * b.radius * 0.15, Math.sin(a) * b.radius * 0.9);
+            d.m.getWorldPosition(this.tmpV3);
+            d.pts.unshift(this.tmpV3.x, this.tmpV3.y, this.tmpV3.z);
+            if (d.pts.length > 48 * 3) d.pts.length = 48 * 3;
+            d.trail.set(d.pts, d.pts.length / 3, cam.position, k => b.radius * 0.18 * (1 - k));
+          }
+        }
+      }
+      if (b.type === 'storm' && camD < b.zone * 2.2 && Math.random() < 0.7) {
+        const src = this.bodyViews[b.def.from];
+        if (src) {
+          const sb = src.body;
+          const dx = b.x - sb.x, dy = b.y - sb.y, dz = b.z - sb.z;
+          const dl = Math.hypot(dx, dy, dz) || 1;
+          const sp = 60 + Math.random() * 40;
+          const j = () => (Math.random() - 0.5) * b.zone * 0.9;
+          this.particles.emit(sb.x + j() * 0.3, sb.y + j() * 0.3, sb.z + j() * 0.3, dx / dl * sp + j() * 0.3, dy / dl * sp + j() * 0.3, dz / dl * sp + j() * 0.3, COLORS.storm, 1.6, 4.0, 0, 0, 0, 0, 0.02);
+        }
+      }
       if (v.mesh) v.mesh.rotation.y += dt * 0.05;
       if (b.ember) {
         v.emberMat.uniforms.uTime.value = t;
@@ -916,7 +1194,7 @@ export class World {
         } else {
           v.glow.material.opacity = 0.3 + 0.1 * Math.sin(t * 2.2) + (v.emberMat.uniforms.uHeat.value) * 0.6;
           const near = s.focusEmber === b.id;
-          v.corona.u.uOpacity.value = (near ? 1.3 : 0.85) * inside(b.corona);
+          v.corona.u.uOpacity.value = (near ? 1.3 : s.nextId === b.id ? 1.15 : 0.6) * inside(b.corona);
         }
         if (v.lane) {
           v.lane.set(v.lane.pts, 24, cam.position, k => b.radius * 0.28 * (1 - k * 0.6));
@@ -1058,7 +1336,12 @@ class CameraRig {
 
     const want = s.cine ? 1 : 0;
     this.blend += (want - this.blend) * (snap ? 1 : 1 - Math.exp(-dt * 2.2));
-    if (s.cine) {
+    if (s.cine && s.cine.direct) {
+      // first-person (LENS): follow exactly, the blend still eases us in
+      this.cine.pos.copy(s.cine.pos);
+      this.cine.look.copy(s.cine.look);
+      this.cine.up.copy(s.cine.up || this.up);
+    } else if (s.cine) {
       this.cine.pos.lerp(s.cine.pos, snap ? 1 : 1 - Math.exp(-dt * 1.5));
       this.cine.look.lerp(s.cine.look, snap ? 1 : 1 - Math.exp(-dt * 3));
       this.cine.up.lerp(s.cine.up || this.up, 1 - Math.exp(-dt * 2)).normalize();
@@ -1082,7 +1365,8 @@ class CameraRig {
     cam.lookAt(this.look);
 
     this.kick = Math.max(0, this.kick - dt * 2.5);
-    const fovT = 72 + Math.max(-4, Math.min(16, (sp - 26) * 0.38)) - s.charge * 6 * (1 - b) + this.kick * 10;
+    let fovT = 72 + Math.max(-4, Math.min(16, (sp - 26) * 0.38)) - s.charge * 6 * (1 - b) + this.kick * 10;
+    if (s.cine && s.cine.fov) fovT = fovT * (1 - b) + s.cine.fov * b;
     this.fov += (fovT - this.fov) * (1 - Math.exp(-dt * 4));
     cam.fov = this.fov;
     cam.updateProjectionMatrix();

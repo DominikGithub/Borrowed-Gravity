@@ -12,23 +12,13 @@ export const PHYS = {
   chargeTime: 1.25,     // seconds to full charge at chargeRate 1
   cometRadius: 0.9,
   targetHysteresis: 1.25,
-  voidAccel: 18,        // pull back toward the level when beyond its edge
   noTargetDecay: 0.7,   // charge leaks away while no gravity well is in range
-  lostTime: 6.5,        // seconds away from every gravity well = lost in the void
+  lostTime: 6.5,        // seconds away from everything = lost in the void
 };
-
-// Is the comet anywhere near something that matters (a gravity field or a
-// cold star)? Too long without this and the game calls it "lost".
-export function nearWell(s, bodies) {
-  for (const b of bodies) {
-    const d = Math.hypot(b.x - s.px, b.y - s.py, b.z - s.pz);
-    if ((b.solid && d < b.influence * 1.2) || (b.ember && !b.lit && d < b.corona * 2.5)) return true;
-  }
-  return false;
-}
 
 // Per-type gravity behaviour.
 //   pull       – delta-v (u/s) a full charge delivers at the reference distance
+//                (negative = a repulsor: borrowing it pushes you away)
 //   refMul     – reference distance as a multiple of the radius
 //   chargeRate – how quickly this body lends its gravity (1 = normal)
 //   influence  – radius (× body radius) inside which gravity can be borrowed
@@ -40,10 +30,18 @@ export const BODY_TYPES = {
   moon:      { pull: 24, refMul: 3.0, chargeRate: 1.4,  influence: 9.0,  lethal: 1.0, fallCap: 1.6 },
   star:      { pull: 40, refMul: 3.0, chargeRate: 1.1,  influence: 5.5,  lethal: 1.3, fallCap: 1.6 },
   blackhole: { pull: 78, refMul: 6.0, chargeRate: 2.4,  influence: 16,   lethal: 2.0, fallCap: 1.5 },
+  whitehole: { pull: -38, refMul: 3.0, chargeRate: 1.2, influence: 8.0,  lethal: 1.0, fallCap: 1.6 },
 };
 
-// Dormant stars ("embers") lend no gravity until they are kindled.
+// Bodies whose zone switches Shift to another function when the spark enters
+// it (only ever checked in FLIGHT – see main.js for the lock rules).
+//   ember   – cold star, corona → KINDLE (pump light)
+//   anchor  – spindle star, sling ring → SLING (spin up, launch)
+//   storm   – flare storm front → SHIELD (raise shield against flares)
+//   subject – rare sight, lens ring → LENS (focus, take a photo)
 export const EMBER = { corona: 3.2 };
+export const ANCHOR = { ring: 7.0 };
+const MIN_CHORD = 0.9;  // storms/lenses only trigger if you'd cross ≥ 0.9 × their radius
 
 // ---------------------------------------------------------------- bodies
 
@@ -57,15 +55,43 @@ export function makeBodies(level) {
       name: def.name || null,
       def,
       lit: false,
+      done: false,
       ember: def.type === 'ember',
       corona: 0,
+      zone: 0,
+      trigger: null,
     };
-    if (b.ember) {
-      b.corona = def.r * EMBER.corona;
-      b.band = def.band || { center: 0.7, width: 0.13, speed: 0.8, wobble: 0 };
-      setGravity(b, null); // no gravity while dormant
-    } else {
-      setGravity(b, def.type);
+    switch (def.type) {
+      case 'ember':
+        setGravity(b, null);            // no gravity while dormant
+        b.corona = b.zone = def.r * EMBER.corona;
+        b.trigger = 'kindle';
+        b.band = def.band || { center: 0.7, width: 0.13, speed: 0.8, wobble: 0 };
+        break;
+      case 'anchor':
+        setGravity(b, null);
+        b.solid = true;
+        b.lethalR = def.r * 1.3;
+        b.zone = def.zone ?? def.r * ANCHOR.ring;
+        b.trigger = 'sling';
+        break;
+      case 'storm':
+        setGravity(b, null);
+        b.zone = def.zone;
+        b.trigger = 'shield';
+        break;
+      case 'subject':
+        setGravity(b, null);
+        b.zone = def.zone;
+        b.trigger = 'lens';
+        break;
+      case 'flarestar':
+        setGravity(b, null);
+        b.solid = true;
+        b.lethalR = def.r * 1.3;
+        break;
+      default:
+        setGravity(b, def.type);
     }
     return b;
   });
@@ -93,6 +119,23 @@ export function lightEmber(b) {
   setGravity(b, 'star');
 }
 
+function zoneActive(b) {
+  if (b.trigger === 'kindle') return !b.lit;
+  if (b.trigger === 'lens') return !b.done;
+  return true;
+}
+
+// Is the comet anywhere near something that matters? Too long without this
+// and the game calls it "lost".
+export function nearWell(s, bodies) {
+  for (const b of bodies) {
+    const d = Math.hypot(b.x - s.px, b.y - s.py, b.z - s.pz);
+    if (b.solid && b.influence > 0 && d < b.influence * 1.2) return true;
+    if (b.trigger && zoneActive(b) && d < b.zone * (b.trigger === 'kindle' ? 2.5 : 1.6)) return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------- ship
 
 export function newShip(start) {
@@ -106,8 +149,7 @@ export function newShip(start) {
     charge: 0,
     targetId: -1,
     pulses: [],
-    ignoreCorona: -1,
-    outside: false,
+    ignore: [],      // zones we are inside of but must not re-trigger
   };
 }
 
@@ -117,18 +159,17 @@ export function cloneShip(s) {
     vx: s.vx, vy: s.vy, vz: s.vz,
     charge: s.charge, targetId: s.targetId,
     pulses: s.pulses.map(p => ({ ...p })),
-    ignoreCorona: s.ignoreCorona,
-    outside: s.outside,
+    ignore: s.ignore.slice(),
   };
 }
 
 // Gravity score of a body at the ship's position (0 when out of range).
 function score(b, s) {
-  if (!b.solid || b.pull <= 0) return 0;
+  if (!b.solid || b.pull === 0) return 0;
   const dx = b.x - s.px, dy = b.y - s.py, dz = b.z - s.pz;
   const r = Math.hypot(dx, dy, dz);
   if (r > b.influence) return 0;
-  return b.pull * Math.min(b.fallCap, b.refDist / r);
+  return Math.abs(b.pull) * Math.min(b.fallCap, b.refDist / r);
 }
 
 export function selectTarget(s, bodies) {
@@ -156,8 +197,21 @@ export function release(s) {
   return p;
 }
 
-// One fixed physics step. Returns null or an event object.
-export function stepShip(s, bodies, dt, holding, bounds) {
+// Remaining straight-line chord through a zone (for storms / lenses).
+function chordAhead(s, b) {
+  const sp = Math.hypot(s.vx, s.vy, s.vz) || 1;
+  const hx = s.vx / sp, hy = s.vy / sp, hz = s.vz / sp;
+  const ox = s.px - b.x, oy = s.py - b.y, oz = s.pz - b.z;
+  const bb = hx * ox + hy * oy + hz * oz;
+  const cc = ox * ox + oy * oy + oz * oz - b.zone * b.zone;
+  const disc = bb * bb - cc;
+  return disc > 0 ? -bb + Math.sqrt(disc) : 0;
+}
+
+// One fixed physics step. Returns null or an event:
+//   { type: 'crash', body }  or  { type: 'zone', mode, body }
+// With triggers=false (used during mode-switch locks) zones are ignored.
+export function stepShip(s, bodies, dt, holding, triggers = true) {
   const tid = selectTarget(s, bodies);
   if (holding) {
     if (tid >= 0) s.charge = Math.min(1, s.charge + dt * bodies[tid].chargeRate / PHYS.chargeTime);
@@ -179,19 +233,8 @@ export function stepShip(s, bodies, dt, holding, bounds) {
     if (pu.t >= PHYS.pulseTime) s.pulses.splice(i, 1);
   }
 
-  s.outside = false;
-  if (bounds) {
-    const dx = bounds.center[0] - s.px, dy = bounds.center[1] - s.py, dz = bounds.center[2] - s.pz;
-    const d = Math.hypot(dx, dy, dz);
-    if (d > bounds.radius) {
-      s.outside = true;
-      const k = PHYS.voidAccel * Math.min(1.6, 0.4 + (d - bounds.radius) / 40) / d;
-      ax += dx * k; ay += dy * k; az += dz * k;
-    }
-  }
-
   s.vx += ax * dt; s.vy += ay * dt; s.vz += az * dt;
-  let sp = Math.hypot(s.vx, s.vy, s.vz);
+  const sp = Math.hypot(s.vx, s.vy, s.vz);
   let target = sp;
   if (s.pulses.length === 0) target = sp + (PHYS.cruise - sp) * (1 - Math.exp(-dt / PHYS.relaxTau));
   target = Math.min(PHYS.maxSpeed, Math.max(PHYS.minSpeed, target));
@@ -207,51 +250,61 @@ export function stepShip(s, bodies, dt, holding, bounds) {
     if (b.solid) {
       const lr = b.lethalR + PHYS.cometRadius;
       if (d2 < lr * lr) return { type: 'crash', body: b };
-    } else if (b.ember && !b.lit) {
-      if (b.id === s.ignoreCorona) {
-        if (d2 > (b.corona * 1.08) ** 2) s.ignoreCorona = -1;
-      } else if (d2 < b.corona * b.corona) {
-        return { type: 'corona', body: b };
-      }
     }
+    if (!b.trigger) continue;
+    const ig = s.ignore.indexOf(b.id);
+    if (ig >= 0) {
+      if (d2 > (b.zone * 1.08) ** 2) s.ignore.splice(ig, 1);
+      continue;
+    }
+    if (!triggers || !zoneActive(b) || d2 >= b.zone * b.zone) continue;
+    if ((b.trigger === 'shield' || b.trigger === 'lens') && chordAhead(s, b) < b.zone * MIN_CHORD) {
+      s.ignore.push(b.id); // only grazing the edge: no mode switch
+      continue;
+    }
+    return { type: 'zone', mode: b.trigger, body: b };
   }
   return null;
 }
 
 // "If I let go right now, where will I go?"  Simulates a release of the
 // current charge and returns the path plus how it ends.
-// With holdUntilFull, it first keeps holding until the charge is full
-// (the faint "potential" path), so both previews are exact.
-export function predict(s, bodies, bounds, horizon = 4.6, every = 3, out = null, holdUntilFull = false) {
+//   holdUntilFull – first keep holding until the charge is full (faint path)
+//   noRelease     – just coast (used for the sling launch line)
+//   lockFor       – seconds at the start during which zones can't trigger
+export function predict(s, bodies, opts = {}) {
+  const { horizon = 4.6, every = 3, out = null, holdUntilFull = false, noRelease = false, lockFor = 0 } = opts;
   const sim = cloneShip(s);
   const pts = out || [];
   pts.length = 0;
   pts.push(sim.px, sim.py, sim.pz);
   let i = 1;
   const steps = Math.round(horizon / PHYS.dt);
+  const lockSteps = Math.round(lockFor / PHYS.dt);
+  const endOf = (ev) => ({ type: ev.type, mode: ev.mode, body: ev.body, x: sim.px, y: sim.py, z: sim.pz });
   if (holdUntilFull) {
     for (let k = 0; k < 2.5 / PHYS.dt && sim.charge < 0.999; k++, i++) {
-      const ev = stepShip(sim, bodies, PHYS.dt, true, bounds);
-      if (ev) {
-        pts.push(sim.px, sim.py, sim.pz);
-        return { pts, end: { type: ev.type, body: ev.body, x: sim.px, y: sim.py, z: sim.pz }, pulsed: false };
-      }
+      const ev = stepShip(sim, bodies, PHYS.dt, true, i > lockSteps);
+      if (ev) { pts.push(sim.px, sim.py, sim.pz); return { pts, end: endOf(ev), pulsed: false }; }
       if (i % every === 0) pts.push(sim.px, sim.py, sim.pz);
     }
   }
-  const pulse = release(sim);
+  const pulse = noRelease ? null : release(sim);
   let end = null;
   for (; i <= steps; i++) {
-    const ev = stepShip(sim, bodies, PHYS.dt, false, bounds);
-    if (ev) {
-      pts.push(sim.px, sim.py, sim.pz);
-      end = { type: ev.type, body: ev.body, x: sim.px, y: sim.py, z: sim.pz };
-      break;
-    }
+    const ev = stepShip(sim, bodies, PHYS.dt, false, i > lockSteps);
+    if (ev) { pts.push(sim.px, sim.py, sim.pz); end = endOf(ev); break; }
     if (i % every === 0) pts.push(sim.px, sim.py, sim.pz);
   }
   return { pts, end, pulsed: !!pulse };
 }
+
+// ---------------------------------------------------------------- vectors
+
+const norm3 = (x, y, z) => { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; };
+const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const smooth01 = (t) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
 
 // ---------------------------------------------------------------- kindle orbit
 // While kindling, the star holds the comet in a scripted loop, then flings it
@@ -259,10 +312,6 @@ export function predict(s, bodies, bounds, horizon = 4.6, every = 3, out = null,
 // The lane makes each star a reliable checkpoint: however you arrive, you
 // leave the same way. Stars without a lane let you out on the far side, on
 // your entry heading.
-
-const norm3 = (x, y, z) => { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; };
-const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
 export function kindleExit(s, b) {
   const Rc = b.corona;
@@ -291,7 +340,6 @@ export function makeKindleOrbit(s, b) {
   if (Math.hypot(...n) < 0.05) n = cross3(u, Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]);
   n = norm3(...n);
   let phi = Math.acos(Math.max(-1, Math.min(1, dot3(u, e))));
-  // phi is the angle from u to e about +n (u×e direction); flip if needed
   if (dot3(cross3(u, e), n) < 0) phi = 2 * Math.PI - phi;
   const tan = cross3(n, u);
   if (dot3(tan, hin) < 0) { n = n.map(v => -v); phi = 2 * Math.PI - phi; }
@@ -308,14 +356,12 @@ export function kindleOrbitPos(o, f, out) {
   const th = o.total * f;
   const [ux, uy, uz] = o.u, [nx, ny, nz] = o.n;
   const c = Math.cos(th), s = Math.sin(th);
-  // Rodrigues: rotate u about n by th (u ⟂ n)
   const kx = ny * uz - nz * uy, ky = nz * ux - nx * uz, kz = nx * uy - ny * ux;
   const r = o.Rc * (1 - 0.28 * Math.sin(Math.PI * f));
   let x = o.cx + (ux * c + kx * s) * r;
   let y = o.cy + (uy * c + ky * s) * r;
   let z = o.cz + (uz * c + kz * s) * r;
   const arc = o.total * o.Rc;
-  // ease in from the straight entry line …
   const bi = 0.08;
   if (f < bi) {
     let w = 1 - f / bi;
@@ -324,7 +370,6 @@ export function kindleOrbitPos(o, f, out) {
     const lx = o.P[0] + o.hin[0] * d, ly = o.P[1] + o.hin[1] * d, lz = o.P[2] + o.hin[2] * d;
     x += (lx - x) * w; y += (ly - y) * w; z += (lz - z) * w;
   }
-  // … and out along the exit lane
   const bs = 0.84;
   if (f > bs) {
     let w = (f - bs) / (1 - bs);
@@ -342,8 +387,8 @@ export function kindleOrbitPos(o, f, out) {
 // into the star (the gauge rises); releasing inside the band ignites it.
 
 export const KINDLE = {
-  enterGap: 1.7,   // s of "Shift does nothing" before the pump goes live
-  exitGap: 1.7,    // s of "Shift does nothing" before flight control returns
+  enterGap: 0.6,   // s the catch into orbit takes before the gauge can start
+  exitGap: 0.6,    // shortest ride round the orbit to the exit lane
   window: 6.5,     // s the star stays receptive
   overload: 1.12,  // gauge value that bursts on its own
   drain: 2.6,      // gauge fall speed after a miss (per s)
@@ -353,3 +398,84 @@ export function bandAt(band, t) {
   const c = band.center + (band.wobble || 0) * Math.sin(t * (band.wobbleSpeed || 2.2));
   return { lo: c - band.width / 2, hi: c + band.width / 2, center: c, perfect: band.width * 0.22 };
 }
+
+// ---------------------------------------------------------------- sling
+// SLING mode: a spindle star catches the spark in a tight orbit. Holding Shift
+// spins you up (faster, and the launch line sweeps round faster too); letting
+// go launches you along the tangent. It is the one way to aim in any direction.
+
+export const SLING = {
+  enterGap: 0.6,   // catch before the sling can start (the orbit keeps turning while you get ready)
+  exitGap: 0.7,    // straight flight after launch, zones off
+  window: 7.0,     // auto-launch if you never let go
+  orbitMul: 0.62,  // orbit radius as a fraction of the ring
+  settle: 1.2,     // s for the orbit radius to settle
+  spinTime: 1.3,   // s of holding to reach full spin
+  maxSpin: 2.0,    // launch speed multiplier at full spin
+  baseOrbit: 0.55, // orbit speed (× cruise) before spinning up – slow enough to aim
+  spinOrbit: 0.9,  // extra orbit speed per unit of spin
+};
+
+export function slingOrbitSpeed(o) { return PHYS.cruise * (SLING.baseOrbit + (o.spin - 1) * SLING.spinOrbit); }
+
+export function makeSlingOrbit(s, b) {
+  const u = norm3(s.px - b.x, s.py - b.y, s.pz - b.z);
+  const r0 = Math.hypot(s.px - b.x, s.py - b.y, s.pz - b.z);
+  const v = norm3(s.vx, s.vy, s.vz);
+  let n = cross3(u, v);
+  if (Math.hypot(...n) < 0.05) n = cross3(u, Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]);
+  n = norm3(...n);
+  const k = cross3(n, u);
+  return { cx: b.x, cy: b.y, cz: b.z, u, k, n, r0, r: b.zone * SLING.orbitMul, theta: 0, t: 0, holdT: 0, spin: 1 };
+}
+
+export function slingRadius(o) { return o.r0 + (o.r - o.r0) * smooth01(o.t / SLING.settle); }
+
+export function slingStep(o, dt, holding) {
+  if (holding) o.holdT += dt;
+  o.spin = 1 + (SLING.maxSpin - 1) * Math.min(1, o.holdT / SLING.spinTime);
+  o.theta += slingOrbitSpeed(o) / slingRadius(o) * dt;
+  o.t += dt;
+}
+
+export function slingPos(o, out = [0, 0, 0]) {
+  const rad = slingRadius(o), c = Math.cos(o.theta), s = Math.sin(o.theta);
+  out[0] = o.cx + rad * (o.u[0] * c + o.k[0] * s);
+  out[1] = o.cy + rad * (o.u[1] * c + o.k[1] * s);
+  out[2] = o.cz + rad * (o.u[2] * c + o.k[2] * s);
+  return out;
+}
+
+export function slingDir(o) {
+  const c = Math.cos(o.theta), s = Math.sin(o.theta);
+  return norm3(-o.u[0] * s + o.k[0] * c, -o.u[1] * s + o.k[1] * c, -o.u[2] * s + o.k[2] * c);
+}
+
+// The free-flying spark you get if you let go right now.
+export function slingLaunch(o, b) {
+  const ship = newShip({ pos: slingPos(o), dir: slingDir(o), speed: PHYS.cruise * o.spin });
+  ship.ignore = [b.id];
+  return ship;
+}
+
+// ---------------------------------------------------------------- shield / lens
+// SHIELD and LENS modes don't steer: the spark coasts straight through the
+// zone (LENS in slow motion) while Shift does something else entirely.
+
+// enterGap / exitGap: seconds of straight coasting (zones off) around the switch.
+// After that, time holds until the player taps Shift to start the next mode.
+export const SHIELD = {
+  enterGap: 0.6, exitGap: 0.6,
+  drain: 0.48,      // shield energy per second while held
+  regen: 0.32,      // per second while lowered
+  minRaise: 0.12,   // energy needed to raise it
+  warn: 1.0,        // seconds of warning before a flare hits
+};
+
+export const LENS = {
+  enterGap: 0.6, exitGap: 0.6,
+  slow: 0.42,       // the spark coasts at this fraction of normal speed
+  window: 6.0,      // seconds to take the shot
+  focusRate: 0.62,  // focus per second while held
+  sway: 0.11,       // camera sway amplitude (radians)
+};
