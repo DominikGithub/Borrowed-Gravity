@@ -222,6 +222,13 @@ body.m-shield .hint, body.m-sling .hint { bottom: auto; top: 72px; }
 .holdkey.small .holdkey-cap { font-size: 22px; inset: 8px; }
 body.pressing .screen:not([hidden]) .holdkey-cap { transform: scale(0.92); box-shadow: 0 0 24px rgba(95, 227, 255, 0.6); }
 
+/* On a phone the sky map is taller than the screen, so it scrolls. Auto margins (not
+   justify-content) centre it when it fits and let it overflow at the bottom, never off
+   the top. pan-y lets a finger drag scroll it; input.js turns the pointercancel the
+   browser sends when a drag starts into 'cancel', so scrolling never counts as a tap. */
+.screen.map { justify-content: flex-start; overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; touch-action: pan-y; }
+.screen.map > :first-child { margin-top: auto; }
+.screen.map > :last-child { margin-bottom: auto; }
 .map-grid { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; max-width: 980px; }
 .card {
   width: 172px; padding: 12px 12px 14px; border-radius: 14px; text-align: center;
