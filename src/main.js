@@ -226,6 +226,8 @@ class Game {
       const got = Object.keys(this.save.photos[L.id] || {}).length;
       el.querySelector('.c-photos').textContent = nSub && i < this.save.unlocked ? `◉ photos ${got}/${nSub}` : '';
     });
+    // on a phone the map scrolls: keep the selected card on screen as taps cycle it
+    this.cards[this.sel]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
   loadBackdrop(i) {
@@ -1142,6 +1144,22 @@ class Game {
 
   updateFlight(dt) {
     this.acc += dt;
+    const s = this.ship;
+    const before = s.targetId;
+    this.flightSteps(dt);
+    // the tether jumped from one body to another: make that moment impossible to miss
+    if (this.mode === 'flight' && before >= 0 && s.targetId >= 0 && s.targetId !== before) this.retarget(this.bodies[s.targetId]);
+  }
+
+  retarget(b) {
+    this.sfx.retarget();
+    this.world.addShock(b.x, b.y, b.z, COLORS.cyan, b.radius * 2.6, 0.7);
+    if (!this.seen.has('retarget')) {
+      this.showHint('retarget', 'The pull <b>switched</b> to another body: the tether shows which one you borrow from.<br>Hold now and the path bends toward the new one.', 6);
+    }
+  }
+
+  flightSteps() {
     const s = this.ship;
     while (this.acc >= PHYS.dt) {
       this.acc -= PHYS.dt;

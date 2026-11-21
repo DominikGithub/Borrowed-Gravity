@@ -48,9 +48,16 @@ export function createInput() {
     pointer = true;
     sync();
   });
-  const up = () => { pointer = false; sync(); };
-  window.addEventListener('pointerup', up);
-  window.addEventListener('pointercancel', up);
+  window.addEventListener('pointerup', () => { pointer = false; sync(); });
+  // The browser took the touch over (a drag that scrolls the sky map, or a system
+  // gesture): drop the press like a focus loss so it never fires as a tap.
+  window.addEventListener('pointercancel', () => {
+    pointer = false;
+    if (st.down && keys.size === 0) {
+      st.down = false;
+      st.queue.push('cancel');
+    }
+  });
   window.addEventListener('contextmenu', (e) => e.preventDefault());
 
   const lose = () => {

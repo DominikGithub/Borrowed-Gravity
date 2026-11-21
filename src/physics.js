@@ -11,7 +11,7 @@ export const PHYS = {
   pulseTime: 0.9,       // a released charge acts over this long (s)
   chargeTime: 1.25,     // seconds to full charge at chargeRate 1
   cometRadius: 0.9,
-  targetHysteresis: 1.25,
+  targetHysteresis: 1.1,  // the tether only jumps to a body that pulls 10% harder (no flicker)
   noTargetDecay: 0.7,   // charge leaks away while no gravity well is in range
   lostTime: 6.5,        // seconds away from everything = lost in the void
 };

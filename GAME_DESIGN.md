@@ -28,6 +28,12 @@ You don't choose a direction: **where you are when you let go is the direction.*
 That gives you two controls from one key. *When* you let go sets the direction, and *how
 long* you held sets the strength.
 
+**Which body you borrow from** is the one pulling hardest where you are now. A dashed
+tether links you to it. When two fields overlap, the tether only jumps to the other body
+once it pulls 10% harder (so it never flickers). The jump plays a two-note chime and
+flashes a ring on the new body, because that's often the moment to act. *Twin Wells*
+(level 3) is built around it.
+
 **The preview.** While you hold, a bright animated path shows exactly where you'd go if
 you let go now. You can watch it swing as you pass the body. A faint path shows "keep
 holding until full, then let go". The colour at the end of the path tells you what

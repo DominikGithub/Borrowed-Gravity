@@ -37,11 +37,11 @@ export const LEVELS = [
   },
   {
     id: 'twins', name: 'Twin Wells', subtitle: 'Two Giants, One Gap',
-    intro: 'Between two giants the pull switches sides. Watch the tether.',
+    intro: 'Between two giants the pull switches sides. When the tether jumps to the right-hand giant, hold Shift, then let go to curve to the star.',
     start: { pos: [0, 0, 0], dir: [0, 0, -1] },
     bodies: [
-      {type: 'giant', pos: [-42, 0, -105], r: 13, palette: 'storm'},
-      {type: 'giant', pos: [42, 6, -150], r: 13, palette: 'amber', rings: true},
+      {type: 'giant', pos: [-46, 0, -95], r: 13, palette: 'storm'},
+      {type: 'giant', pos: [26, 6, -145], r: 13, palette: 'amber', rings: true},
       {type: 'ember', pos: [78.2, 14.1, -186.1], r: 6, lane: [0.947, 0.135, -0.292], name: 'Pallas', band: {center: 0.66, width: 0.15, speed: 0.85, wobble: 0.04}},
       {type: 'rock', pos: [167.7, 61.2, -213.7], r: 9, palette: 'teal'},
       {type: 'ember', pos: [214.1, 91.9, -231.1], r: 6, lane: [0.435, 0.891, -0.134], name: 'Rhee', band: {center: 0.72, width: 0.15, speed: 0.85, wobble: 0.04}},

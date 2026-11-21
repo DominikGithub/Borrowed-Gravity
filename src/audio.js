@@ -212,6 +212,8 @@ export class Sfx {
   live() { this.tone(1046.5, 0.25, { type: 'sine', gain: 0.12 }); this.tone(1568, 0.3, { type: 'sine', gain: 0.06, at: 0.05 }); }
   locked() { this.tone(140, 0.09, { type: 'square', gain: 0.04, verb: 0 }); }
   tick() { this.tone(880, 0.05, { type: 'sine', gain: 0.05, verb: 0 }); }
+  // the borrowed body changed (the tether jumped sides)
+  retarget() { this.tone(523.3, 0.12, { type: 'triangle', gain: 0.09, verb: 0.2 }); this.tone(784, 0.16, { type: 'triangle', gain: 0.09, at: 0.07, verb: 0.3 }); }
   miss(over) { this.tone(over ? 520 : 260, 0.35, { type: 'sawtooth', gain: 0.07, slide: over ? 0.4 : 0.6, verb: 0.2 }); }
   ignite(perfect) {
     const base = perfect ? [523.3, 659.3, 784, 987.8, 1318.5] : [440, 554.4, 659.3, 880];
